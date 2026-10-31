@@ -1,0 +1,14 @@
+{
+  "name": "mini-ecommerce-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["services/*", "frontend"],
+  "scripts": {
+    "dev": "concurrently -n products,orders,web -c blue,green,magenta \"npm run dev -w @shop/product-service\" \"npm run dev -w @shop/order-service\" \"npm run dev -w @shop/frontend\"",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build -w @shop/frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
