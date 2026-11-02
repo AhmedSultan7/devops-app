@@ -40,7 +40,8 @@ Browser -> frontend (nginx, :8080)
 - Node.js 20+ and npm 10+
 - Docker 24+
 - For Kubernetes: minikube, `kubectl`, Helm 3
-- For local runs without Docker: PostgreSQL 14+
+
+PostgreSQL does not need to be installed on your machine. The Helm chart runs `postgres:17` inside the cluster.
 
 ## 1. Run locally with npm
 
@@ -83,7 +84,7 @@ docker run -d --name postgres --network shopnet \
   -e POSTGRES_PASSWORD=change-me-admin \
   -v pgdata:/var/lib/postgresql/data \
   -v "$PWD/my-app/files/init.sql":/docker-entrypoint-initdb.d/init.sql:ro \
-  postgres:16
+  postgres:17
 
 # Wait about 10 seconds, then:
 
