@@ -1,15 +1,15 @@
 # Mini E-commerce Platform
 
-A small microservices application used to practice Docker, Kubernetes, Helm and Jenkins CI/CD. It runs locally with npm, in Docker, or on Kubernetes (minikube) through a Helm chart that Jenkins builds and deploys.
+A small microservices application used to practice Kubernetes, Helm and Jenkins CI/CD. Everything runs inside a minikube cluster: Jenkins builds the images with Kaniko, pushes them to Docker Hub and deploys the Helm chart.
 
 ## Architecture
 
 ```
-Browser -> frontend (nginx, :8080)
+Browser -> frontend (nginx, NodePort :8080)
               |-- /api/products -> product-service (:3001) -> products_db
               '-- /api/orders   -> order-service   (:3002) -> orders_db
                                       '-- reserves stock via product-service
-                          PostgreSQL (one server, two databases)
+                          PostgreSQL 17 (StatefulSet, two databases)
 ```
 
 - **Frontend**: React + Vite, served by nginx. nginx proxies `/api/products` and `/api/orders` to the two services.
@@ -31,97 +31,32 @@ Browser -> frontend (nginx, :8080)
 │   ├── files/init.sql        database schema and seed data (single source of truth)
 │   └── templates/            Deployments, Services, Postgres StatefulSet, init ConfigMap
 ├── Jenkinsfile               CI/CD pipeline
-├── .dockerignore
+├── .dockerignore             keeps .env files and node_modules out of images
 └── package.json              npm workspace root (one package-lock.json)
 ```
 
+The services share one npm workspace and a single `package-lock.json` at the repository root. For that reason **every image is built from the repository root**, with the Dockerfile selected by path.
+
 ## Requirements
 
-- Node.js 20+ and npm 10+
-- Docker 24+
-- For Kubernetes: minikube, `kubectl`, Helm 3
+- minikube, `kubectl` and Helm 3
+- A Docker Hub account (images are pushed to `soltanahmed1960/devops-app-*`)
+- Jenkins running in the cluster (see [CI/CD with Jenkins](#cicd-with-jenkins))
 
-PostgreSQL does not need to be installed on your machine. The Helm chart runs `postgres:17` inside the cluster.
+PostgreSQL and Node.js do not need to be installed on your machine. The cluster runs `postgres:17`, and the builds and tests run in Jenkins agent pods.
 
-## 1. Run locally with npm
+## Deploy to Kubernetes with Helm
 
-Create the databases (run as a PostgreSQL administrator):
+The chart in `my-app/` deploys the frontend, the two services and a PostgreSQL StatefulSet. The release name and namespace are both `mini-ecommerce`.
 
-```bash
-psql -U postgres -f my-app/files/init.sql
-```
-
-The script creates `shop_user`, `products_db`, `orders_db`, the tables and sample products. Change the example credentials before using it anywhere other than a local machine.
-
-Install and start:
-
-```bash
-npm install
-cp services/product-service/.env.example services/product-service/.env
-cp services/order-service/.env.example services/order-service/.env
-npm run dev
-```
-
-The frontend is at http://localhost:5173. Health checks: http://localhost:3001/health and http://localhost:3002/health.
-
-## 2. Run with Docker
-
-The services share one npm workspace and one `package-lock.json`, so **build every image from the repository root**. Each Dockerfile is selected with `-f`:
-
-```bash
-docker build -f services/product-service/Dockerfile -t shop-product-service:1.0 .
-docker build -f services/order-service/Dockerfile   -t shop-order-service:1.0 .
-docker build -f frontend/Dockerfile                 -t shop-frontend:1.0 .
-```
-
-Run the containers in this order:
-
-```bash
-docker network create shopnet
-
-# 1. PostgreSQL (init.sql runs on first start only)
-docker run -d --name postgres --network shopnet \
-  -e POSTGRES_PASSWORD=change-me-admin \
-  -v pgdata:/var/lib/postgresql/data \
-  -v "$PWD/my-app/files/init.sql":/docker-entrypoint-initdb.d/init.sql:ro \
-  postgres:17
-
-# Wait about 10 seconds, then:
-
-# 2. Backends
-docker run -d --name product-service --network shopnet \
-  -e DATABASE_URL=postgres://shop_user:shop_dev_password@postgres:5432/products_db \
-  shop-product-service:1.0
-
-docker run -d --name order-service --network shopnet \
-  -e DATABASE_URL=postgres://shop_user:shop_dev_password@postgres:5432/orders_db \
-  -e PRODUCT_SERVICE_URL=http://product-service:3001 \
-  shop-order-service:1.0
-
-# 3. Frontend (host 8081 -> container 8080)
-docker run -d --name frontend --network shopnet -p 8081:8080 shop-frontend:1.0
-```
-
-Open http://localhost:8081 and verify with `curl http://localhost:8081/api/products`.
-
-Notes:
-
-- `init.sql` runs only when the `pgdata` volume is empty. To re-initialize: `docker rm -f postgres && docker volume rm pgdata`.
-- Start the backends before the frontend, because nginx resolves the service names at startup.
-- Clean up with `docker rm -f frontend order-service product-service postgres`.
-
-## 3. Deploy to Kubernetes with Helm
-
-The chart in `my-app/` deploys the frontend, the two services and a PostgreSQL StatefulSet. The default namespace and release name are both `mini-ecommerce`.
-
-### Prerequisites
+### 1. Prepare the namespace and secrets
 
 ```bash
 minikube start
 kubectl create namespace mini-ecommerce
 ```
 
-Create the application secrets first. The chart references them with `existingSecret` and does not create them. Use the key names that your templates read (the examples below assume `DATABASE_URL`):
+The chart references the application secrets with `existingSecret` and does not create them, so create them before installing. Use the key names that your templates read (the examples assume `DATABASE_URL`):
 
 ```bash
 kubectl create secret generic product-service-env -n mini-ecommerce \
@@ -131,7 +66,7 @@ kubectl create secret generic order-service-env -n mini-ecommerce \
   --from-literal=DATABASE_URL=postgres://shop_user:shop_dev_password@postgres:5432/orders_db
 ```
 
-### Install
+### 2. Install
 
 ```bash
 helm upgrade --install mini-ecommerce ./my-app -n mini-ecommerce
@@ -146,7 +81,7 @@ helm list -n mini-ecommerce
 
 Expected pods: `frontend`, `order-service`, `product-service` and `postgres-0`, all `Running`.
 
-### Open the app
+### 3. Open the app
 
 The frontend Service is a NodePort:
 
@@ -165,14 +100,20 @@ Main values in `my-app/values.yaml`:
 | `order.image.repository` | `soltanahmed1960/devops-app-order` | Order service image |
 | `product.image.repository` | `soltanahmed1960/devops-app-product` | Product service image |
 | `*.image.tag` | `latest` | Overridden with the commit hash by the pipeline |
+| `*.image.pullPolicy` | `Always` | Image pull policy |
 | `frontend.service.type` | `NodePort` | How the frontend is exposed |
-| `product.existingSecret` / `order.existingSecret` | `product-service-env` / `order-service-env` | Secrets holding the database URLs |
-| `frontend.env.*` | in-cluster service URLs | Where nginx proxies API calls |
-| `imagePullSecrets` | `[]` | Set to a pull secret if the Docker Hub repos are private |
+| `product.existingSecret` | `product-service-env` | Secret with the product database URL |
+| `order.existingSecret` | `order-service-env` | Secret with the order database URL |
+| `frontend.env.*`, `order.env.*` | in-cluster service URLs | Where the services find each other |
+| `imagePullSecrets` | `[]` | Set to a pull secret if the Docker Hub repositories are private |
+
+The Docker Hub repositories must be public, or `imagePullSecrets` must point to a secret created in the `mini-ecommerce` namespace.
 
 ### Database initialization
 
-`my-app/files/init.sql` is loaded into a ConfigMap and mounted into Postgres. As with Docker, it runs **only when the data directory is empty**. After changing the schema, recreate the database:
+`my-app/files/init.sql` is loaded into a ConfigMap and mounted into Postgres. It creates `shop_user`, `products_db`, `orders_db`, the tables and sample products.
+
+The script runs **only when the data directory is empty**. A redeploy keeps the existing `data-postgres-0` volume, so schema changes are not applied automatically. To recreate the database:
 
 ```bash
 kubectl delete statefulset postgres -n mini-ecommerce
@@ -180,25 +121,32 @@ kubectl delete pvc data-postgres-0 -n mini-ecommerce
 helm upgrade --install mini-ecommerce ./my-app -n mini-ecommerce
 ```
 
-This deletes all database contents.
+This deletes all database contents. Uninstalling the release also leaves the PVC behind, so delete it too if you want a clean start.
 
-## 4. CI/CD with Jenkins
+## CI/CD with Jenkins
 
-Jenkins runs inside the cluster (installed with the official Helm chart as the release `myjenkins` in the `default` namespace). The `Jenkinsfile` uses the Jenkins Kubernetes plugin: each build starts a temporary agent pod and deletes it afterwards.
+Jenkins runs in the `default` namespace, installed with the official Helm chart as the release `myjenkins`. The `Jenkinsfile` uses the Jenkins Kubernetes plugin: each build starts a temporary agent pod and deletes it when the build ends.
 
 ### Pipeline stages
 
 | Stage | Container | What it does |
 |---|---|---|
-| Test | `node` | `npm ci && npm test` for the product service |
-| Build & Push | `kaniko` | Builds the three images from the repo root and pushes them to Docker Hub, tagged with the first 7 characters of the commit hash |
-| Deploy | `helm` | `helm upgrade --install` with `--set *.image.tag=<commit>`, using `--atomic --wait` |
+| Test | `node` | `npm ci && npm test` in `services/product-service` |
+| Build & Push | `kaniko` | Builds the three images from the repository root and pushes them to Docker Hub, tagged with the first 7 characters of the commit hash |
+| Deploy | `helm` | `helm upgrade --install` with `--set product.image.tag`, `order.image.tag` and `frontend.image.tag` set to that hash, using `--atomic --wait --timeout 3m` |
 
-The agent pod also contains the `jnlp` container that the plugin adds automatically. All containers share the same workspace.
+The agent pod also contains a `jnlp` container, added automatically by the plugin, which connects the pod to Jenkins. All containers share one workspace.
+
+Each build gets a unique image tag, so Helm sees a change on every run and rolls the pods. With a fixed `latest` tag it would not.
 
 ### One-time setup
 
-Docker Hub credentials for Kaniko (use an access token, in the namespace where agent pods run):
+**Kubernetes plugin.** In *Manage Jenkins -> Clouds -> Kubernetes*, agents use the in-cluster addresses, not the NodePort address used in the browser:
+
+- Jenkins URL: `http://myjenkins.default.svc.cluster.local:8080`
+- Jenkins tunnel: `myjenkins-agent.default.svc.cluster.local:50000`
+
+**Docker Hub credentials for Kaniko.** Create the secret in `default`, where the agent pods run, using an access token:
 
 ```bash
 kubectl create secret docker-registry dockerhub-cred -n default \
@@ -206,7 +154,7 @@ kubectl create secret docker-registry dockerhub-cred -n default \
   --docker-password=<access-token>
 ```
 
-Permission for Jenkins' ServiceAccount to deploy into the application namespace:
+**Deploy permission.** Agent pods run as the `myjenkins` ServiceAccount in `default`. Grant it the built-in `edit` role in the application namespace:
 
 ```bash
 kubectl create rolebinding jenkins-deployer \
@@ -223,28 +171,61 @@ kubectl auth can-i create statefulsets \
 ### Create the job
 
 1. In Jenkins choose **New Item**, name it `mini-ecommerce` and select **Pipeline**.
-2. Under **Pipeline** set **Definition** to *Pipeline script from SCM*, **SCM** to *Git*, the repository URL, branch `*/main` and script path `Jenkinsfile`.
-3. Save and click **Build Now**.
+2. Under **Pipeline** set **Definition** to *Pipeline script from SCM* and **SCM** to *Git*.
+3. Set the repository URL to `https://github.com/AhmedSultan7/devops-app.git`, the branch to `*/main` and the script path to `Jenkinsfile`.
+4. Save and click **Build Now**.
 
-Pushes can trigger builds automatically with a GitHub webhook (needs a public URL, for example through ngrok) or with *Poll SCM*.
+While a build runs, watch the cluster:
 
-### Troubleshooting the pipeline
+```bash
+kubectl get pods -n default -w            # the agent pod
+kubectl get pods -n mini-ecommerce -w     # the application pods
+```
+
+Run these in two separate terminals. After a successful build, confirm that the pods use the commit tag:
+
+```bash
+kubectl get deploy -n mini-ecommerce -o wide
+helm history mini-ecommerce -n mini-ecommerce
+```
+
+### Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | Agent pod stuck in `ContainerCreating` | `dockerhub-cred` secret missing in `default` |
-| Build & Push cannot find `package-lock.json` | Build context must be the repo root, not the service folder |
-| Deploy fails with `Forbidden` | RoleBinding missing in `mini-ecommerce` |
-| Pods in `ImagePullBackOff` | Image tag not pushed, or Docker Hub repo is private without a pull secret |
-| Release rolled back after 3 minutes | Pods not ready: rerun `helm upgrade` without `--atomic` and run `kubectl describe pod` |
+| Agent stuck at "Waiting for agent to connect" | Jenkins URL or tunnel in the Kubernetes cloud settings points at the NodePort address instead of the in-cluster service names |
+| Build & Push cannot find `package-lock.json` | The build context must be the repository root, not the service folder |
+| Deploy fails with `Forbidden` | The RoleBinding is missing in `mini-ecommerce` |
+| Pods in `ImagePullBackOff` | The image tag was not pushed, or the Docker Hub repository is private without a pull secret |
+| `CreateContainerConfigError` | `product-service-env` or `order-service-env` is missing, or lacks the expected key |
+| Release rolled back after 3 minutes | Pods did not become ready. Rerun `helm upgrade` without `--atomic` and inspect with `kubectl describe pod` and `kubectl logs` |
+| Postgres is up but the databases are missing | An old `data-postgres-0` volume was reused, so `init.sql` did not run. See [Database initialization](#database-initialization) |
+
+### Possible improvements
+
+- Trigger builds automatically: use *Poll SCM*, or a GitHub webhook through a tunnel such as ngrok, since the minikube address is not reachable from GitHub.
+- Pin the Kaniko image to a specific version instead of `:debug`. The original Kaniko project is archived, so check which fork or alternative (BuildKit, Buildah) you want long term.
+- Use a Multibranch Pipeline and deploy only from `main` with `when { branch 'main' }`.
+- Add tests for the order service to the Test stage.
+- Use a dedicated ServiceAccount for agent pods with narrower permissions.
+- Move to GitOps (for example Argo CD), so Git drives the deployment instead of `helm upgrade` from Jenkins.
+
+## Building images by hand
+
+The pipeline builds the images for you. If you need to build one manually, run it from the repository root:
+
+```bash
+docker build -f services/product-service/Dockerfile -t soltanahmed1960/devops-app-product:dev .
+docker build -f services/order-service/Dockerfile   -t soltanahmed1960/devops-app-order:dev .
+docker build -f frontend/Dockerfile                 -t soltanahmed1960/devops-app-frontend:dev .
+```
+
+The `.dockerignore` at the repository root keeps `.env` files and `node_modules` out of the build context. Without it, `COPY services/...` would copy `.env` files into the images.
 
 ## Tests
 
-```bash
-npm test
-```
-
-Tests use mocked database pools and do not need PostgreSQL.
+The product service has Jest tests that use a mocked database pool and need no PostgreSQL. Jenkins runs them in the Test stage. To run them yourself, use `npm ci && npm test` from `services/product-service`.
 
 ## API summary
 
@@ -261,6 +242,8 @@ Tests use mocked database pools and do not need PostgreSQL.
 | POST | `/internal/products/:id/reserve` | Reserve stock for an order |
 | POST | `/internal/products/:id/release` | Release a reservation |
 
+Product creation body:
+
 ```json
 {"name":"Mechanical Keyboard","description":"Hot-swappable keyboard","price":79.99,"stock":15,"imageUrl":""}
 ```
@@ -274,16 +257,18 @@ Tests use mocked database pools and do not need PostgreSQL.
 | GET | `/api/orders/:id` | Get order |
 | POST | `/api/orders` | Create order |
 
+Order creation body:
+
 ```json
 {"customerName":"Ahmed","items":[{"productId":1,"quantity":2}]}
 ```
 
-Example:
+Try it through the frontend's NodePort URL (the `minikube service ... --url` output):
 
 ```bash
-curl http://localhost:3001/api/products
+curl <frontend-url>/api/products
 
-curl -X POST http://localhost:3002/api/orders \
+curl -X POST <frontend-url>/api/orders \
   -H 'Content-Type: application/json' \
   -d '{"customerName":"Ahmed","items":[{"productId":1,"quantity":2}]}'
 ```
@@ -292,12 +277,10 @@ curl -X POST http://localhost:3002/api/orders \
 
 | Variable | Used by | Default | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | product, order | none | PostgreSQL connection string |
+| `DATABASE_URL` | product, order | none | PostgreSQL connection string, provided by the Kubernetes secrets |
 | `PORT` | product, order | `3001` / `3002` | Listening port |
 | `PRODUCT_SERVICE_URL` | order, frontend | `http://product-service:3001` | Product service address |
 | `ORDER_SERVICE_URL` | frontend | `http://order-service:3002` | Order service address |
-
-Pass secrets at run time (`-e`, `--env-file`, or Kubernetes Secrets). The `.dockerignore` keeps `.env` files out of the images.
 
 ## Notes and limitations
 
@@ -305,4 +288,4 @@ Pass secrets at run time (`-e`, `--env-file`, or Kubernetes Secrets). The `.dock
 - Checkout reserves stock first and saves the order second, releasing the stock if saving fails. It is not a distributed transaction, so a crash between the two steps can leave a reservation that needs reconciliation.
 - Each service owns its database. The order service must not query the product database directly.
 - The product API accepts create, update and delete requests without authentication, and nginx forwards them. Restrict those methods or add authentication before exposing the app beyond a local or demo environment.
-- The database credentials in this README are for local development only. Use real Secrets and rotate them for any shared environment.
+- The database credentials in this README are for development only. Use real Secrets and rotate them for any shared environment, and never commit `.env` files.
