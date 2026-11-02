@@ -34,10 +34,11 @@ spec:
   }
 
   environment {
-    REGISTRY  = 'soltanahmed1960'
-    TAG       = "${env.GIT_COMMIT.take(7)}"
-    RELEASE   = 'mini-ecommerce'
-    NAMESPACE = 'mini-ecommerce'
+    REGISTRY      = 'soltanahmed1960'
+    TAG           = "${env.GIT_COMMIT.take(7)}"
+    RELEASE       = 'mini-ecommerce'
+    NAMESPACE     = 'mini-ecommerce'
+    SLACK_CHANNEL = '#jenkins-builds'
   }
 
   stages {
@@ -84,6 +85,23 @@ spec:
           '''
         }
       }
+    }
+  }
+
+  post {
+    success {
+      slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: 'good',
+        message: ":white_check_mark: *SUCCESS* ${env.JOB_NAME} #${env.BUILD_NUMBER}\nDeployed `${env.TAG}` to `${env.NAMESPACE}` in ${currentBuild.durationString.replace(' and counting', '')}\n<${env.BUILD_URL}|Open build>"
+      )
+    }
+    failure {
+      slackSend(
+        channel: env.SLACK_CHANNEL,
+        color: 'danger',
+        message: ":x: *FAILED* ${env.JOB_NAME} #${env.BUILD_NUMBER}\nCommit `${env.TAG}`\n<${env.BUILD_URL}console|Open console output>"
+      )
     }
   }
 }
