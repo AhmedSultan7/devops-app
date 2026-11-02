@@ -75,7 +75,7 @@ spec:
       steps {
         container('helm') {
           sh '''
-            helm upgrade --install $RELEASE ./my-app \
+            helm upgrade --install $RELEASE ./helm \
               --namespace $NAMESPACE \
               --set product.image.tag=$TAG \
               --set order.image.tag=$TAG \

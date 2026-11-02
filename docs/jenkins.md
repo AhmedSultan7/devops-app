@@ -23,7 +23,7 @@ All containers share one workspace. Each stage selects the container that has th
 |---|---|---|
 | Test | `node` | `npm ci && npm test` in `services/product-service` |
 | Build & Push | `kaniko` | Builds the three images from the repository root and pushes them as `soltanahmed1960/devops-app-{product,order,frontend}:<commit>` |
-| Deploy | `helm` | `helm upgrade --install mini-ecommerce ./my-app` with the three image tags set to the commit hash, using `--atomic --wait --timeout 3m` |
+| Deploy | `helm` | `helm upgrade --install mini-ecommerce ./helm` with the three image tags set to the commit hash, using `--atomic --wait --timeout 3m` |
 
 The tag is the first 7 characters of the commit hash. Because every build has a unique tag, Helm detects a change and rolls the pods. A fixed `latest` tag would not trigger a rollout.
 

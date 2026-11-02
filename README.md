@@ -36,7 +36,7 @@ Browser -> frontend (nginx, NodePort :8080)
 ├── services/
 │   ├── product-service/   API, tests, Dockerfile
 │   └── order-service/     API, Dockerfile
-├── my-app/                Helm chart
+├── helm/                Helm chart
 │   ├── values.yaml
 │   ├── files/init.sql     database schema and seed data
 │   └── templates/         Deployments, Services, Postgres StatefulSet, init ConfigMap
@@ -75,7 +75,7 @@ kubectl create secret generic order-service-env -n mini-ecommerce \
 ### 2. Install the chart
 
 ```bash
-helm upgrade --install mini-ecommerce ./my-app -n mini-ecommerce
+helm upgrade --install mini-ecommerce ./helm -n mini-ecommerce
 kubectl get pods -n mini-ecommerce
 ```
 
@@ -90,7 +90,7 @@ minikube service <frontend-service-name> -n mini-ecommerce --url
 
 ## Configuration
 
-Key values in `my-app/values.yaml`:
+Key values in `helm/values.yaml`:
 
 | Value | Default | Description |
 |---|---|---|
@@ -105,14 +105,14 @@ Key values in `my-app/values.yaml`:
 
 ## Database initialization
 
-`my-app/files/init.sql` creates `shop_user`, both databases, the tables and sample products. It is mounted into PostgreSQL through a ConfigMap.
+`helm/files/init.sql` creates `shop_user`, both databases, the tables and sample products. It is mounted into PostgreSQL through a ConfigMap.
 
 The script runs **only when the data directory is empty**. Redeploying keeps the existing `data-postgres-0` volume, so schema changes are not applied automatically. To recreate the database (this deletes all data):
 
 ```bash
 kubectl delete statefulset postgres -n mini-ecommerce
 kubectl delete pvc data-postgres-0 -n mini-ecommerce
-helm upgrade --install mini-ecommerce ./my-app -n mini-ecommerce
+helm upgrade --install mini-ecommerce ./helm -n mini-ecommerce
 ```
 
 Uninstalling the release also leaves the volume behind, so delete the PVC for a clean start.
