@@ -55,20 +55,21 @@ spec:
       steps {
         container('kaniko') {
           sh '''
-            /kaniko/executor \
-              --context "$WORKSPACE/services/product-service" \
-              --dockerfile "$WORKSPACE/services/product-service/Dockerfile" \
-              --destination "$REGISTRY/devops-app-product:$TAG"
+            # Copy all sources into /kaniko once, before any build wipes the workspace
+            rm -rf /kaniko/src && mkdir -p /kaniko/src
+            cp -a "$WORKSPACE/services" "$WORKSPACE/frontend" /kaniko/src/
+            find /kaniko/src -name node_modules -prune -exec rm -rf {} +
 
-            /kaniko/executor \
-              --context "$WORKSPACE/services/order-service" \
-              --dockerfile "$WORKSPACE/services/order-service/Dockerfile" \
-              --destination "$REGISTRY/devops-app-order:$TAG"
+            build() {
+              /kaniko/executor \
+                --context "/kaniko/src/$1" \
+                --dockerfile "/kaniko/src/$1/Dockerfile" \
+                --destination "$REGISTRY/$2:$TAG"
+            }
 
-            /kaniko/executor \
-              --context "$WORKSPACE/frontend" \
-              --dockerfile "$WORKSPACE/frontend/Dockerfile" \
-              --destination "$REGISTRY/devops-app-frontend:$TAG"
+            build services/product-service devops-app-product
+            build services/order-service   devops-app-order
+            build frontend                 devops-app-frontend
           '''
         }
       }
