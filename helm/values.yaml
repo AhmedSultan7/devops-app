@@ -1,9 +1,6 @@
 # For public Docker Hub repositories:
 imagePullSecrets: []
 
-# If your repositories are private, replace the line above with:
-# imagePullSecrets:
-#   - name: dockerhub-pull
 
 frontend:
   replicaCount: 1

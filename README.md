@@ -1,6 +1,6 @@
 # Mini E-commerce Platform
 
-A microservices e-commerce application deployed on Kubernetes with Helm and delivered through a Jenkins CI/CD pipeline. It is built to practice container builds, Helm packaging and automated deployments on a local minikube cluster.
+A microservices e-commerce application deployed on Kubernetes with Helm and delivered through a Jenkins CI/CD pipeline with Slack notifications. It is built to practice container builds, Helm packaging and automated deployments on a local minikube cluster.
 
 ## Tech stack
 
@@ -11,6 +11,7 @@ A microservices e-commerce application deployed on Kubernetes with Helm and deli
 | Database | PostgreSQL 17 (StatefulSet) |
 | Packaging | Helm 3 |
 | CI/CD | Jenkins on Kubernetes, Kaniko, Docker Hub |
+| Notifications | Slack |
 | Platform | Kubernetes (minikube) |
 
 ## Architecture
@@ -36,11 +37,11 @@ Browser -> frontend (nginx, NodePort :8080)
 ├── services/
 │   ├── product-service/   API, tests, Dockerfile
 │   └── order-service/     API, Dockerfile
-├── helm/                Helm chart
+├── helm/                  Helm chart
 │   ├── values.yaml
 │   ├── files/init.sql     database schema and seed data
 │   └── templates/         Deployments, Services, Postgres StatefulSet, init ConfigMap
-├── docs/jenkins.md        CI/CD setup and troubleshooting
+├── docs/jenkins.md        CI/CD and Slack setup, troubleshooting
 ├── Jenkinsfile            pipeline definition
 └── .dockerignore
 ```
@@ -52,6 +53,7 @@ The services share one npm workspace with a single `package-lock.json` at the re
 - minikube, `kubectl` and Helm 3
 - A Docker Hub account for the image repositories (`soltanahmed1960/devops-app-*`)
 - Jenkins running in the cluster (see [docs/jenkins.md](docs/jenkins.md))
+- A Slack workspace, if you want build notifications
 
 ## Quick start
 
@@ -119,13 +121,15 @@ Uninstalling the release also leaves the volume behind, so delete the PVC for a 
 
 ## CI/CD
 
-Every build of the `main` branch runs three stages in a temporary Kubernetes agent pod:
+Every build runs in a temporary Kubernetes agent pod and has three stages:
 
 1. **Test**: runs the product service tests with `npm ci && npm test`.
 2. **Build & Push**: builds the three images with Kaniko and pushes them to Docker Hub, tagged with the short commit hash.
 3. **Deploy**: runs `helm upgrade --install` with the new tags, using `--atomic --wait` so failed releases roll back.
 
-Setup instructions, required permissions, troubleshooting and planned improvements are in [docs/jenkins.md](docs/jenkins.md).
+When the build ends, Jenkins posts the result to the `#jenkins-builds` Slack channel: a success message with the deployed tag and duration, or a failure message with a link to the console output.
+
+Setup instructions, required permissions, Slack configuration, troubleshooting and planned improvements are in [docs/jenkins.md](docs/jenkins.md).
 
 ## API reference
 
@@ -164,4 +168,4 @@ curl -X POST <frontend-url>/api/orders \
 - This is a learning project, not a production commerce system. It has no authentication, payments, shipping or customer accounts.
 - Checkout reserves stock and then saves the order, releasing the stock if saving fails. This is not a distributed transaction, so a crash between the two steps can leave a reservation that needs reconciliation.
 - The product API accepts create, update and delete requests without authentication, and nginx forwards them. Add authentication or restrict those methods before exposing the application beyond a local environment.
-- The example credentials are for development only. Use real Secrets for any shared environment, and never commit `.env` files.
+- The example credentials are for development only. Use real Secrets for any shared environment, and never commit `.env` files or tokens.
