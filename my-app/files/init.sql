@@ -1,5 +1,5 @@
 -- Run as a PostgreSQL administrator: psql -U postgres -f db/init.sql
-CREATE ROLE shop_user WITH LOGIN PASSWORD 'shop_dev_password';
+CREATE ROLE shop_user WITH LOGIN PASSWORD :'shop_password';
 
 CREATE DATABASE products_db OWNER shop_user;
 CREATE DATABASE orders_db OWNER shop_user;
@@ -44,3 +44,20 @@ CREATE TABLE IF NOT EXISTS order_items (
   unit_price NUMERIC(10,2) NOT NULL CHECK (unit_price >= 0),
   quantity INTEGER NOT NULL CHECK (quantity > 0)
 );
+
+
+\connect products_db
+
+GRANT USAGE ON SCHEMA public TO shop_user;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON ALL TABLES IN SCHEMA public TO shop_user;
+GRANT USAGE, SELECT
+  ON ALL SEQUENCES IN SCHEMA public TO shop_user;
+
+\connect orders_db
+
+GRANT USAGE ON SCHEMA public TO shop_user;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON ALL TABLES IN SCHEMA public TO shop_user;
+GRANT USAGE, SELECT
+  ON ALL SEQUENCES IN SCHEMA public TO shop_user;

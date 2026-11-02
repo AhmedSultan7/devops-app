@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  type: {{ .Values.order.service.type }}
+
+  selector:
+    {{- include "my-app.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+
+  ports:
+    - name: http
+      port: {{ .Values.order.service.port }}
+      targetPort: http
+      protocol: TCP

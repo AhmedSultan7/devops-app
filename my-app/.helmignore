@@ -1,0 +1,11 @@
+.git/
+.gitignore
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.bak
+*.tmp
+.env
+.env.*
+node_modules/

@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order
+spec:
+  replicas: {{ .Values.order.replicaCount }}
+
+  selector:
+    matchLabels:
+      {{- include "my-app.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: order
+
+  template:
+    metadata:
+      labels:
+        {{- include "my-app.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: order
+
+    spec:
+      automountServiceAccountToken: false
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: order-service
+          image: "{{ .Values.order.image.repository }}:{{ .Values.order.image.tag }}"
+          imagePullPolicy: {{ .Values.order.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.order.service.targetPort }}
+
+          env:
+            {{- range $name, $value := .Values.order.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+
+          {{- with .Values.order.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . | quote }}
+          {{- end }}
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+          resources:
+            {{- toYaml .Values.order.resources | nindent 12 }}
